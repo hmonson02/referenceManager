@@ -438,7 +438,7 @@ def main():
     - `embase_*.ris` - Embase  
     - `cochrane_*.ris` - Cochrane
     - `scopus_*.ris` - Scopus
-    - `savedrecs.ris` - Web of Science
+    - `savedrecs_*.ris or Web of Science_*.ris or wos_*.ris in filename` - Web of Science
     
     Or use manual mapping below.
     """)
