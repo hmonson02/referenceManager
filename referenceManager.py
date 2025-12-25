@@ -71,7 +71,7 @@ def detect_source_db(filename):
         return 'Cochrane'
     elif 'scopus' in filename_lower:
         return 'Scopus'
-    elif 'wos' in filename_lower or 'web of science' in filename_lower:
+    elif 'wos' in filename_lower or 'web of science' in filename_lower or 'savedrecs' in filename_lower:
         return 'Web of Science'
     return 'Unknown'
 
@@ -81,28 +81,50 @@ def detect_source_db(filename):
 # ============================================================
 
 def parse_ris_content(content, filename=""):
-    """Parse RIS format content."""
+    """Parse RIS format content from various sources (MEDLINE, Embase, Cochrane, Scopus, Web of Science)."""
     records = []
     current_record = {}
     
+    # Comprehensive RIS tag mapping supporting multiple database formats
     ris_mapping = {
-        'TI': 'title', 'T1': 'title', 'T2': 'source',
+        # Title
+        'TI': 'title', 'T1': 'title',
+        # Authors
         'AU': 'authors', 'A1': 'authors', 'A2': 'authors',
-        'PY': 'year', 'Y1': 'year', 'DA': 'year',
+        # Year
+        'PY': 'year', 'Y1': 'year', 'DA': 'year', 'Y2': 'year',
+        # Abstract
         'AB': 'abstract', 'N2': 'abstract',
+        # DOI
         'DO': 'doi', 'DOI': 'doi',
-        'SN': 'issn', 'IS': 'issue',
-        'VL': 'volume', 'SP': 'page_start', 'EP': 'page_end',
-        'JF': 'source', 'JO': 'source_abbrev', 'JA': 'source_abbrev',
+        # Journal/Source
+        'JF': 'source', 'T2': 'source', 'JO': 'source_abbrev', 'JA': 'source_abbrev', 'J2': 'source_abbrev',
+        # Volume, Issue, Pages
+        'VL': 'volume', 'IS': 'issue', 'SP': 'page_start', 'EP': 'page_end',
+        # ISSN/ISBN
+        'SN': 'issn',
+        # Publisher
         'PB': 'publisher',
-        'LA': 'language', 'KW': 'keywords',
+        # Language
+        'LA': 'language',
+        # Keywords
+        'KW': 'keywords',
+        # URL
         'UR': 'url', 'L2': 'url',
+        # Accession/ID
         'AN': 'accession', 'ID': 'id',
+        # Database
         'DB': 'database', 'DP': 'database',
+        # Affiliations/Address
         'AD': 'affiliations',
+        # Notes
         'N1': 'notes',
-        'TY': 'doc_type',
-        'PM': 'pmid',
+        # Document type
+        'TY': 'doc_type', 'M3': 'doc_type_alt',
+        # PubMed ID
+        'PM': 'pmid', 'C2': 'pmid',
+        # Article number (Scopus uses C7)
+        'C7': 'article_number',
     }
     
     def save_record():
@@ -111,6 +133,8 @@ def parse_ris_content(content, filename=""):
                 current_record['authors'] = ';'.join(current_record.pop('AU_list'))
             if 'KW_list' in current_record:
                 current_record['keywords'] = '; '.join(current_record.pop('KW_list'))
+            if 'AD_list' in current_record:
+                current_record['affiliations'] = '; '.join(current_record.pop('AD_list'))
             records.append(current_record.copy())
     
     lines = content.split('\n')
@@ -120,6 +144,7 @@ def parse_ris_content(content, filename=""):
         
         if match:
             tag, value = match.groups()
+            value = value.strip()
             
             if tag == 'ER':
                 save_record()
@@ -133,16 +158,36 @@ def parse_ris_content(content, filename=""):
             
             field = ris_mapping.get(tag)
             if field:
+                # Handle multiple authors
                 if tag in ['AU', 'A1', 'A2']:
                     if 'AU_list' not in current_record:
                         current_record['AU_list'] = []
-                    current_record['AU_list'].append(value.strip())
+                    current_record['AU_list'].append(value)
+                # Handle multiple keywords
                 elif tag == 'KW':
                     if 'KW_list' not in current_record:
                         current_record['KW_list'] = []
-                    current_record['KW_list'].append(value.strip())
+                    current_record['KW_list'].append(value)
+                # Handle multiple affiliations (Scopus has multiple AD tags)
+                elif tag == 'AD':
+                    if 'AD_list' not in current_record:
+                        current_record['AD_list'] = []
+                    current_record['AD_list'].append(value)
+                # Handle year - extract 4-digit year
+                elif tag in ['PY', 'Y1', 'DA', 'Y2']:
+                    year_match = re.search(r'(19|20)\d{2}', value)
+                    if year_match:
+                        current_record['year'] = year_match.group()
+                # Handle ISSN - clean up format
+                elif tag == 'SN':
+                    # Remove suffixes like "(ISSN)" and take first ISSN if multiple
+                    issn_clean = re.sub(r'\s*\(ISSN\)', '', value).strip()
+                    if not current_record.get('issn'):
+                        current_record['issn'] = issn_clean.split()[0] if issn_clean else ''
                 else:
-                    current_record[field] = value.strip()
+                    # Don't overwrite if already set (first value wins)
+                    if field not in current_record:
+                        current_record[field] = value
     
     save_record()
     return records
@@ -389,9 +434,11 @@ def main():
     st.sidebar.markdown("**Database Detection**")
     st.sidebar.markdown("""
     Files are auto-detected based on filename:
-    - `medline_*.ris` → MEDLINE
-    - `embase_*.ris` → Embase  
-    - `cochrane_*.ris` → Cochrane
+    - `medline_*.ris` - MEDLINE
+    - `embase_*.ris` - Embase  
+    - `cochrane_*.ris` - Cochrane
+    - `scopus_*.ris` - Scopus
+    - `savedrecs.ris` - Web of Science
     
     Or use manual mapping below.
     """)
